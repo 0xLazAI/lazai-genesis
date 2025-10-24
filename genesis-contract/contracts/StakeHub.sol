@@ -12,6 +12,8 @@ import "./interface/0.8.x/IGovToken.sol";
 import "./interface/0.8.x/IStakeCredit.sol";
 import "./lib/0.8.x/Utils.sol";
 
+pragma experimental ABIEncoderV2;
+
 contract StakeHub is SystemV2, Initializable, Protectable {
     using Utils for string;
     using Utils for bytes;
@@ -30,9 +32,25 @@ contract StakeHub is SystemV2, Initializable, Protectable {
 
     uint256 public constant INIT_MAX_NUMBER_NODE_ID = 5;
 
+    bytes public constant INIT_VALIDATORSET_BYTES =
+    hex"000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000002200000000000000000000000000754445aeda0441230d3ab099b0942181915186c0000000000000000000000000754445aeda0441230d3ab099b0942181915186c0000000000000000000000003ef11d03353cc6e5f342e7c4eff81f43abe183f5000000000000000000000000000000000000000000000000000000000000006400000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002097007a7ab3b4ca24f8b88e6dceb764fe8bff810bf45fc16ef7bf0941fcbd7a270000000000000000000000003f8f2908b1b5b6ef3eec1968fcdf8340a6bec2210000000000000000000000003f8f2908b1b5b6ef3eec1968fcdf8340a6bec22100000000000000000000000015ca00b3bd38ec4b065eb7463d4ed8ad3ce9dbf6000000000000000000000000000000000000000000000000000000000000006400000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000020dac4b2f85de5e04c301a077b08256f659dddf36a39578361b1999df56237ab8e0000000000000000000000009ab1a8b89460fccd8eb6739352300988915c71fe0000000000000000000000009ab1a8b89460fccd8eb6739352300988915c71fe0000000000000000000000001f2d033a533dc14c0c75d02fe6adbc0ad4755107000000000000000000000000000000000000000000000000000000000000006400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000201b494a5bc634bfa140c1f5b8f765c7c0203a5d3a73883542ec3dd0daafc36157";
+
     // receive fund status
     uint8 private constant _DISABLE = 0;
     uint8 private constant _ENABLE = 1;
+
+    /*----------------- structs for initialization -----------------*/
+    struct ValidatorSetPackage {
+        InitialValidator[] validatorSet;
+    }
+
+    struct InitialValidator {
+        address consensusAddress;
+        address feeAddress;
+        address operatorAddress;
+        uint64 votingPower;
+        bytes tendermintPublicKey;
+    }
 
     /*----------------- errors -----------------*/
     // @notice signature: 0x5f28f62b
@@ -180,6 +198,7 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         address agent;
         // Malaketh-Layered: Tendermint/Malachite consensus public key (32 bytes Ed25519)
         bytes tendermintPubKey;
+        uint64 votingPower;
         uint256[18] __reservedSlots; // Reduced from 19 to 18
     }
 
@@ -205,8 +224,8 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     event ValidatorCreated(
         address indexed consensusAddress,
         address indexed operatorAddress,
-        address indexed creditContract,
-        bytes voteAddress
+        address indexed creditContract
+//        bytes voteAddress
     );
     event StakeCreditInitialized(address indexed operatorAddress, address indexed creditContract);
     event ConsensusAddressEdited(address indexed operatorAddress, address indexed newConsensusAddress);
@@ -260,7 +279,7 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     /**
      * @dev this function is invoked by Metis Tendermint consensus engine during the hard fork
      */
-    function initialize() external initializer onlyCoinbase onlyZeroGasPrice {
+    function initialize() external initializer {
         transferGasLimit = 5000;
         minSelfDelegationMETIS = 2_000 ether;
         minDelegationMETISChange = 1 ether;
@@ -274,6 +293,9 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         maxFelonyBetweenBreatheBlock = 2;
         // Different address will be set depending on the environment
         __Protectable_init_unchained(0x08E68Ec70FA3b629784fDB28887e206ce8561E08);
+
+        // Initialize validators from INIT_VALIDATORSET_BYTES
+        _initializeValidatorsFromBytes();
     }
 
     /*----------------- external functions -----------------*/
@@ -305,16 +327,12 @@ contract StakeHub is SystemV2, Initializable, Protectable {
 
     /**
      * @param consensusAddress the consensus address of the validator
-     * @param voteAddress the vote address of the validator
-     * @param blsProof the bls proof of the vote address
      * @param tendermintPubKey the Tendermint/Malachite public key (32 bytes Ed25519)
      * @param commission the commission of the validator
      * @param description the description of the validator
      */
     function createValidator(
         address consensusAddress,
-        bytes calldata voteAddress,
-        bytes calldata blsProof,
         bytes calldata tendermintPubKey,
         Commission calldata commission,
         Description calldata description
@@ -327,9 +345,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         if (consensusToOperator[consensusAddress] != address(0)) {
             revert DuplicateConsensusAddress();
         }
-        if (voteToOperator[voteAddress] != address(0)) {
-            revert DuplicateVoteAddress();
-        }
         bytes32 monikerHash = keccak256(abi.encodePacked(description.moniker));
         if (_monikerSet[monikerHash]) revert DuplicateMoniker();
 
@@ -339,13 +354,11 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         if (consensusAddress == address(0)) revert InvalidConsensusAddress();
         if (
             commission.maxRate > 5_000 || commission.rate > commission.maxRate
-                || commission.maxChangeRate > commission.maxRate
+            || commission.maxChangeRate > commission.maxRate
         ) revert InvalidCommission();
         if (!_checkMoniker(description.moniker)) revert InvalidMoniker();
         // Malaketh-Layered: verify Tendermint public key length
         if (tendermintPubKey.length != TENDERMINT_PUBKEY_LENGTH) revert InvalidTendermintPubKey();
-        // proof-of-possession verify
-        if (!_checkVoteAddress(operatorAddress, voteAddress, blsProof)) revert InvalidVoteAddress();
 
         // deploy stake credit proxy contract
         address creditContract = _deployStakeCredit(operatorAddress, description.moniker);
@@ -357,15 +370,16 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         valInfo.operatorAddress = operatorAddress;
         valInfo.creditContract = creditContract;
         valInfo.createdTime = block.timestamp;
-        valInfo.voteAddress = voteAddress;
+//        valInfo.voteAddress = voteAddress;
         valInfo.description = description;
         valInfo.commission = commission;
         valInfo.updateTime = block.timestamp;
-        valInfo.tendermintPubKey = tendermintPubKey; // Malaketh-Layered: save Tendermint public key
+        valInfo.tendermintPubKey = tendermintPubKey;
+        valInfo.votingPower = delegation; // TODO
         consensusToOperator[consensusAddress] = operatorAddress;
-        voteToOperator[voteAddress] = operatorAddress;
+//        voteToOperator[voteAddress] = operatorAddress;
 
-        emit ValidatorCreated(consensusAddress, operatorAddress, creditContract, voteAddress);
+        emit ValidatorCreated(consensusAddress, operatorAddress, creditContract);
         emit Delegated(operatorAddress, operatorAddress, delegation, delegation);
         emit Delegated(operatorAddress, DEAD_ADDRESS, LOCK_AMOUNT, LOCK_AMOUNT);
 
@@ -495,7 +509,7 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         Validator memory valInfo = _validators[operatorAddress];
         if (valInfo.jailed && delegator != operatorAddress) revert OnlySelfDelegation();
 
-        uint256 shares = IStakeCredit(valInfo.creditContract).delegate{ value: metisAmount }(delegator);
+        uint256 shares = IStakeCredit(valInfo.creditContract).delegate{value: metisAmount}(delegator);
         emit Delegated(operatorAddress, delegator, shares, metisAmount);
 
         IGovToken(GOV_TOKEN_ADDR).sync(valInfo.creditContract, delegator);
@@ -540,12 +554,12 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         uint256 shares,
         bool delegateVotePower
     )
-        external
-        whenNotPaused
-        notInBlackList
-        validatorExist(srcValidator)
-        validatorExist(dstValidator)
-        enableReceivingFund
+    external
+    whenNotPaused
+    notInBlackList
+    validatorExist(srcValidator)
+    validatorExist(dstValidator)
+    enableReceivingFund
     {
         if (shares == 0) revert ZeroShares();
         if (srcValidator == dstValidator) revert SameValidator();
@@ -560,17 +574,17 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         // check if the srcValidator has enough self delegation
         if (
             delegator == srcValidator
-                && IStakeCredit(srcValInfo.creditContract).getPooledMETIS(srcValidator) < minSelfDelegationMETIS
+            && IStakeCredit(srcValInfo.creditContract).getPooledMETIS(srcValidator) < minSelfDelegationMETIS
         ) {
             revert SelfDelegationNotEnough();
         }
 
         uint256 feeCharge = metisAmount * redelegateFeeRate / REDELEGATE_FEE_RATE_BASE;
-        (bool success,) = dstValInfo.creditContract.call{ value: feeCharge }("");
+        (bool success,) = dstValInfo.creditContract.call{value: feeCharge}("");
         if (!success) revert TransferFailed();
 
         metisAmount -= feeCharge;
-        uint256 newShares = IStakeCredit(dstValInfo.creditContract).delegate{ value: metisAmount }(delegator);
+        uint256 newShares = IStakeCredit(dstValInfo.creditContract).delegate{value: metisAmount}(delegator);
         emit Redelegated(srcValidator, dstValidator, delegator, shares, newShares, metisAmount);
 
         address[] memory stakeCredits = new address[](2);
@@ -637,12 +651,13 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         address operatorAddress = consensusToOperator[consensusAddress];
         Validator memory valInfo = _validators[operatorAddress];
         if (valInfo.creditContract == address(0) || valInfo.jailed) {
-            SYSTEM_REWARD_ADDR.call{ value: msg.value }("");
+            (bool success,) = SYSTEM_REWARD_ADDR.call{value: msg.value}("");
+            require(success, "System reward transfer failed");
             emit RewardDistributeFailed(operatorAddress, "INVALID_VALIDATOR");
             return;
         }
 
-        IStakeCredit(valInfo.creditContract).distributeReward{ value: msg.value }(valInfo.commission.rate);
+        IStakeCredit(valInfo.creditContract).distributeReward{value: msg.value}(valInfo.commission.rate);
         emit RewardDistributed(operatorAddress, msg.value);
 
         IGovToken(GOV_TOKEN_ADDR).sync(valInfo.creditContract, operatorAddress);
@@ -718,7 +733,7 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         // check if the consensusAddress has already expired
         if (
             consensusExpiration[consensusAddress] != 0
-                && consensusExpiration[consensusAddress] + BREATHE_BLOCK_INTERVAL < block.timestamp
+            && consensusExpiration[consensusAddress] + BREATHE_BLOCK_INTERVAL < block.timestamp
         ) {
             revert ConsensusAddressExpired();
         }
@@ -986,7 +1001,7 @@ contract StakeHub is SystemV2, Initializable, Protectable {
      *
      * @return consensusAddrs the consensus addresses of the validators
      * @return votingPowers the voting powers of the validators. The voting power will be 0 if the validator is jailed.
-     * @return voteAddrs the vote addresses of the validators
+     * @return operatorAddrs the operator addresses of the validators
      * @return tendermintPubKeys the Tendermint/Malachite public keys of the validators (32 bytes Ed25519)
      * @return totalLength the total number of validators
      */
@@ -994,35 +1009,47 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         uint256 offset,
         uint256 limit
     )
-        external
-        view
-        returns (
-            address[] memory consensusAddrs,
-            uint256[] memory votingPowers,
-            bytes[] memory voteAddrs,
-            bytes[] memory tendermintPubKeys,
-            uint256 totalLength
-        )
+    external
+    view
+    returns (
+        address[] memory consensusAddrs,
+        uint256[] memory votingPowers,
+        address[] memory operatorAddrs,
+        bytes[] memory tendermintPubKeys,
+        uint256 totalLength
+    )
     {
         totalLength = _validatorSet.length();
         if (offset >= totalLength) {
-            return (consensusAddrs, votingPowers, voteAddrs, tendermintPubKeys, totalLength);
+            return (consensusAddrs, votingPowers, operatorAddrs, tendermintPubKeys, totalLength);
         }
 
         limit = limit == 0 ? totalLength : limit;
         uint256 count = (totalLength - offset) > limit ? limit : (totalLength - offset);
         consensusAddrs = new address[](count);
         votingPowers = new uint256[](count);
-        voteAddrs = new bytes[](count);
+        operatorAddrs = new address[](count);
         tendermintPubKeys = new bytes[](count);
         for (uint256 i; i < count; ++i) {
             address operatorAddress = _validatorSet.at(offset + i);
             Validator memory valInfo = _validators[operatorAddress];
             consensusAddrs[i] = valInfo.consensusAddress;
-            votingPowers[i] = valInfo.jailed ? 0 : IStakeCredit(valInfo.creditContract).totalPooledMETIS();
-            voteAddrs[i] = valInfo.voteAddress;
+            votingPowers[i] = valInfo.jailed ? 0 : valInfo.votingPower;
+            operatorAddrs[i] = valInfo.operatorAddress;
             tendermintPubKeys[i] = valInfo.tendermintPubKey;
         }
+    }
+
+    /**
+     * @dev Get the INIT_VALIDATORSET_BYTES constant for debugging
+     * @return The INIT_VALIDATORSET_BYTES constant value
+     */
+    function getInitValidatorSetBytes()
+    external
+    pure
+    returns (bytes memory)
+    {
+        return INIT_VALIDATORSET_BYTES;
     }
 
     /**
@@ -1159,7 +1186,7 @@ contract StakeHub is SystemV2, Initializable, Protectable {
             // Check if the ASCII value of the character falls outside the range of alphanumeric characters
             if (
                 (uint8(bz[i]) < 48 || uint8(bz[i]) > 57) && (uint8(bz[i]) < 65 || uint8(bz[i]) > 90)
-                    && (uint8(bz[i]) < 97 || uint8(bz[i]) > 122)
+                && (uint8(bz[i]) < 97 || uint8(bz[i]) > 122)
             ) {
                 // Character is a special character
                 return false;
@@ -1192,7 +1219,7 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         bytes memory output = new bytes(1);
         assembly {
             let len := mload(input)
-            if iszero(staticcall(not(0), 0x66, add(input, 0x20), len, add(output, 0x20), 0x01)) { revert(0, 0) }
+            if iszero(staticcall(not(0), 0x66, add(input, 0x20), len, add(output, 0x20), 0x01)) {revert(0, 0)}
         }
         uint8 result = uint8(output[0]);
         if (result != uint8(1)) {
@@ -1203,7 +1230,7 @@ contract StakeHub is SystemV2, Initializable, Protectable {
 
     function _deployStakeCredit(address operatorAddress, string memory moniker) internal returns (address) {
         address creditProxy = address(new TransparentUpgradeableProxy(STAKE_CREDIT_ADDR, DEAD_ADDRESS, ""));
-        IStakeCredit(creditProxy).initialize{ value: msg.value }(operatorAddress, moniker);
+        IStakeCredit(creditProxy).initialize{value: msg.value}(operatorAddress, moniker);
         emit StakeCreditInitialized(operatorAddress, creditProxy);
 
         return creditProxy;
@@ -1280,6 +1307,51 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     function maxNodeIDsInitializer() internal {
         if (maxNodeIDs == 0) {
             maxNodeIDs = INIT_MAX_NUMBER_NODE_ID;
+        }
+    }
+
+    /**
+     * @dev Initialize validators from INIT_VALIDATORSET_BYTES
+     * This function is called during contract initialization to set up initial validators
+     */
+    function _initializeValidatorsFromBytes() internal {
+        InitialValidator[] memory validatorSet = abi.decode(INIT_VALIDATORSET_BYTES, (InitialValidator[]));
+
+        for (uint256 i; i < validatorSet.length; ++i) {
+            InitialValidator memory val = validatorSet[i];
+
+            address operatorAddress = val.operatorAddress;
+
+            // Add to _validatorSet
+            _validatorSet.add(operatorAddress);
+
+            // Create validator info using storage reference
+            Validator storage valInfo = _validators[operatorAddress];
+            valInfo.consensusAddress = val.consensusAddress;
+            valInfo.operatorAddress = operatorAddress;
+            valInfo.creditContract = address(0); // TODO: Set up proper credit contract
+            valInfo.createdTime = block.timestamp;
+            valInfo.voteAddress = new bytes(0); // 使用空字节数组作为占位符
+            valInfo.description = Description({
+                moniker: "",
+                identity: "",
+                website: "",
+                details: ""
+            });
+            valInfo.commission = Commission({
+                rate: 0,
+                maxRate: 0,
+                maxChangeRate: 0
+            });
+            valInfo.jailed = false;
+            valInfo.jailUntil = 0;
+            valInfo.updateTime = block.timestamp;
+            valInfo.agent = address(0); // TODO: Set up proper agent
+            valInfo.tendermintPubKey = val.tendermintPublicKey;
+            valInfo.votingPower = val.votingPower;
+
+            // Set up mappings
+            consensusToOperator[val.consensusAddress] = operatorAddress;
         }
     }
 }
