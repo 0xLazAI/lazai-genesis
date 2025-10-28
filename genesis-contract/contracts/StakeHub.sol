@@ -98,8 +98,12 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     error ExceedsMaxNodeIDs();
     // @notice signature: 0x440bc78e
     error DuplicateNodeID();
-    // @notice signature: 0x????????
+    // @notice signature: 0x2d4160cd
     error InvalidTendermintPubKey();
+    // @notice signature: 0x539707fb
+    error GenesisValidatorCannotDelegate();
+    // @notice signature: 0xd5642d99
+    error GenesisValidatorCannotUndelegate();
 
     /*----------------- storage -----------------*/
     uint8 private _receiveFundStatus;
@@ -430,6 +434,9 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         // Only the validator itself can delegate to itself
         if (delegator != operatorAddress) revert OnlySelfDelegation();
 
+        // Genesis validators (created via initialize) cannot delegate
+        if (valInfo.creditContract == address(0)) revert GenesisValidatorCannotDelegate();
+
         uint256 shares = IStakeCredit(valInfo.creditContract).delegate{value: metisAmount}(delegator);
         emit Delegated(operatorAddress, delegator, shares, metisAmount);
 
@@ -455,6 +462,9 @@ contract StakeHub is SystemV2, Initializable, Protectable {
 
         // Only the validator itself can undelegate from itself
         if (delegator != operatorAddress) revert OnlySelfDelegation();
+
+        // Genesis validators (created via initialize) cannot undelegate
+        if (valInfo.creditContract == address(0)) revert GenesisValidatorCannotUndelegate();
 
         uint256 metisAmount = IStakeCredit(valInfo.creditContract).undelegate(delegator, shares);
         emit Undelegated(operatorAddress, delegator, shares, metisAmount);
