@@ -20,17 +20,11 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     using EnumerableSet for EnumerableSet.AddressSet;
 
     /*----------------- constants -----------------*/
-    uint256 private constant BLS_PUBKEY_LENGTH = 48;
-    uint256 private constant BLS_SIG_LENGTH = 96;
     uint256 private constant TENDERMINT_PUBKEY_LENGTH = 32;
 
     address public constant DEAD_ADDRESS = address(0xdEaD);
-    uint256 public constant LOCK_AMOUNT = 1 ether;
-    uint256 public constant REDELEGATE_FEE_RATE_BASE = 100000; // 100%
 
     uint256 public constant BREATHE_BLOCK_INTERVAL = 1 days;
-
-    uint256 public constant INIT_MAX_NUMBER_NODE_ID = 5;
 
     bytes public constant INIT_VALIDATORSET_BYTES =
     hex"000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000001e00000000000000000000000000754445aeda0441230d3ab099b0942181915186c0000000000000000000000003ef11d03353cc6e5f342e7c4eff81f43abe183f500000000000000000000000000000000000000000000000000000002540be4000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000002097007a7ab3b4ca24f8b88e6dceb764fe8bff810bf45fc16ef7bf0941fcbd7a270000000000000000000000003f8f2908b1b5b6ef3eec1968fcdf8340a6bec22100000000000000000000000015ca00b3bd38ec4b065eb7463d4ed8ad3ce9dbf600000000000000000000000000000000000000000000000000000002540be40000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000020dac4b2f85de5e04c301a077b08256f659dddf36a39578361b1999df56237ab8e0000000000000000000000009ab1a8b89460fccd8eb6739352300988915c71fe0000000000000000000000001f2d033a533dc14c0c75d02fe6adbc0ad475510700000000000000000000000000000000000000000000000000000002540be400000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000201b494a5bc634bfa140c1f5b8f765c7c0203a5d3a73883542ec3dd0daafc36157";
@@ -60,8 +54,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     error DuplicateMoniker();
     // @notice signature: 0x2f64097e
     error SelfDelegationNotEnough();
-    // @notice signature: 0xdc81db85
-    error InvalidCommission();
     // @notice signature: 0x5dba5ad7
     error InvalidMoniker();
     // @notice signature: 0xca40c236
@@ -86,24 +78,17 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     error TransferFailed();
     // @notice signature: 0x41abc801
     error InvalidRequest();
-    // @notice signature: 0xc2aee074
+    // @notice signature: 0x539707fb
+    error GenesisValidatorCannotDelegate();
+    // @notice signature: 0xd5642d99
+    error GenesisValidatorCannotUndelegate();
     error ConsensusAddressExpired();
     // @notice signature: 0x0d7b78d4
     error InvalidSynPackage();
     // @notice signature: 0x682a6e7c
     error InvalidValidator();
-    // @notice signature: 0x6490ffd3
-    error InvalidNodeID();
-    // @notice signature: 0x246be614
-    error ExceedsMaxNodeIDs();
-    // @notice signature: 0x440bc78e
-    error DuplicateNodeID();
     // @notice signature: 0x2d4160cd
     error InvalidTendermintPubKey();
-    // @notice signature: 0x539707fb
-    error GenesisValidatorCannotDelegate();
-    // @notice signature: 0xd5642d99
-    error GenesisValidatorCannotUndelegate();
 
     /*----------------- storage -----------------*/
     uint8 private _receiveFundStatus;
@@ -114,7 +99,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     uint256 public minDelegationMETISChange;
     uint256 public maxElectedValidators;
     uint256 public unbondPeriod;
-    uint256 public redelegateFeeRate;
     uint256 public epochLength;
 
     // slash params
@@ -143,13 +127,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     // slash key => slash jail time
     mapping(bytes32 => uint256) private _felonyRecords;
 
-    // governance controlled maximum number of NodeIDs per validator (default is 5).
-    uint256 public maxNodeIDs;
-
-    // mapping from a validator's operator address to an array of their registered NodeIDs,
-    // where each NodeID is stored as a fixed 32-byte value.
-    mapping(address => bytes32[]) private validatorNodeIDs;
-
     /*----------------- structs and events -----------------*/
     struct StakeMigrationPackage {
         address operatorAddress; // the operator address of the target validator to delegate to
@@ -172,13 +149,12 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         address creditContract;
         uint256 createdTime;
         Description description;
-        Commission commission;
         bool jailed;
         uint256 jailUntil;
         uint256 updateTime;
         bytes tendermintPubKey;
         uint256 votingPower;
-        uint256[18] __reservedSlots; // Reduced from 19 to 18
+        uint256[18] __reservedSlots;
     }
 
     struct Description {
@@ -186,12 +162,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         string identity;
         string website;
         string details;
-    }
-
-    struct Commission {
-        uint64 rate; // the commission rate charged to delegators(10000 is 100%)
-        uint64 maxRate; // maximum commission rate which validator can ever charge
-        uint64 maxChangeRate; // maximum daily increase of the validator commission
     }
 
     enum SlashType {
@@ -207,20 +177,9 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     );
     event StakeCreditInitialized(address indexed operatorAddress, address indexed creditContract);
     event ConsensusAddressEdited(address indexed operatorAddress, address indexed newConsensusAddress);
-    event CommissionRateEdited(address indexed operatorAddress, uint64 newCommissionRate);
     event DescriptionEdited(address indexed operatorAddress);
     event Delegated(address indexed operatorAddress, address indexed delegator, uint256 shares, uint256 metisAmount);
     event Undelegated(address indexed operatorAddress, address indexed delegator, uint256 shares, uint256 metisAmount);
-    event Redelegated(
-        address indexed srcValidator,
-        address indexed dstValidator,
-        address indexed delegator,
-        uint256 oldShares,
-        uint256 newShares,
-        uint256 metisAmount
-    );
-    event RewardDistributed(address indexed operatorAddress, uint256 reward);
-    event RewardDistributeFailed(address indexed operatorAddress, bytes failReason);
     event ValidatorSlashed(
         address indexed operatorAddress, uint256 jailUntil, uint256 slashAmount, SlashType slashType
     );
@@ -228,10 +187,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     event ValidatorEmptyJailed(address indexed operatorAddress);
     event ValidatorUnjailed(address indexed operatorAddress);
     event Claimed(address indexed operatorAddress, address indexed delegator, uint256 metisAmount);
-
-    // Events for adding and removing NodeIDs.
-    event NodeIDAdded(address indexed validator, bytes32 nodeID);
-    event NodeIDRemoved(address indexed validator, bytes32 nodeID);
 
     /*----------------- modifiers -----------------*/
     modifier validatorExist(
@@ -261,7 +216,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         minDelegationMETISChange = 1 ether;
         maxElectedValidators = 45;
         unbondPeriod = 7 days;
-        redelegateFeeRate = 2;
         epochLength = 30;
         downtimeSlashAmount = 10 ether;
         felonySlashAmount = 200 ether;
@@ -269,7 +223,7 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         felonyJailTime = 30 days;
         maxFelonyBetweenBreatheBlock = 2;
         // Different address will be set depending on the environment
-        __Protectable_init_unchained(0x08E68Ec70FA3b629784fDB28887e206ce8561E08);
+        __Protectable_init_unchained(0x9fB29AAc15b9A4B7F17c3385939b007540f4d791);
 
         // Initialize validators from INIT_VALIDATORSET_BYTES
         _initializeValidatorsFromBytes();
@@ -279,13 +233,11 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     /**
      * @param consensusAddress the consensus address of the validator
      * @param tendermintPubKey the Tendermint/Malachite public key (32 bytes Ed25519)
-     * @param commission the commission of the validator
      * @param description the description of the validator
      */
     function createValidator(
         address consensusAddress,
         bytes calldata tendermintPubKey,
-        Commission calldata commission,
         Description calldata description
     ) external payable whenNotPaused notInBlackList {
         // basic check
@@ -298,14 +250,10 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         bytes32 monikerHash = keccak256(abi.encodePacked(description.moniker));
         if (_monikerSet[monikerHash]) revert DuplicateMoniker();
 
-        uint256 delegation = msg.value - LOCK_AMOUNT; // create validator need to lock 1 METIS
+        uint256 delegation = msg.value; // All funds are used for delegation
         if (delegation < minSelfDelegationMETIS) revert SelfDelegationNotEnough();
 
         if (consensusAddress == address(0)) revert InvalidConsensusAddress();
-        if (
-            commission.maxRate > 5_000 || commission.rate > commission.maxRate
-            || commission.maxChangeRate > commission.maxRate
-        ) revert InvalidCommission();
         if (!_checkMoniker(description.moniker)) revert InvalidMoniker();
 
         if (tendermintPubKey.length != TENDERMINT_PUBKEY_LENGTH) revert InvalidTendermintPubKey();
@@ -321,7 +269,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         valInfo.creditContract = creditContract;
         valInfo.createdTime = block.timestamp;
         valInfo.description = description;
-        valInfo.commission = commission;
         valInfo.updateTime = block.timestamp;
         valInfo.tendermintPubKey = tendermintPubKey;
 //        valInfo.votingPower // come from IStakeCredit when get
@@ -330,7 +277,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
 
         emit ValidatorCreated(consensusAddress, operatorAddress, creditContract);
         emit Delegated(operatorAddress, operatorAddress, delegation, delegation);
-        emit Delegated(operatorAddress, DEAD_ADDRESS, LOCK_AMOUNT, LOCK_AMOUNT);
 
         IGovToken(GOV_TOKEN_ADDR).sync(creditContract, operatorAddress);
     }
@@ -356,28 +302,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         consensusToOperator[newConsensusAddress] = operatorAddress;
 
         emit ConsensusAddressEdited(operatorAddress, newConsensusAddress);
-    }
-
-    /**
-     * @param commissionRate the new commission rate of the validator
-     */
-    function editCommissionRate(
-        uint64 commissionRate
-    ) external whenNotPaused notInBlackList validatorExist(_bep410MsgSender()) {
-        address operatorAddress = _bep410MsgSender();
-        Validator storage valInfo = _validators[operatorAddress];
-        if (valInfo.updateTime + BREATHE_BLOCK_INTERVAL > block.timestamp) revert UpdateTooFrequently();
-
-        if (commissionRate > valInfo.commission.maxRate) revert InvalidCommission();
-        uint256 changeRate = commissionRate >= valInfo.commission.rate
-            ? commissionRate - valInfo.commission.rate
-            : valInfo.commission.rate - commissionRate;
-        if (changeRate > valInfo.commission.maxChangeRate) revert InvalidCommission();
-
-        valInfo.commission.rate = commissionRate;
-        valInfo.updateTime = block.timestamp;
-
-        emit CommissionRateEdited(operatorAddress, commissionRate);
     }
 
     /**
@@ -475,60 +399,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     }
 
     /**
-     * @param srcValidator the operator address of the validator to be redelegated from
-     * @param dstValidator the operator address of the validator to be redelegated to
-     * @param shares the shares to be redelegated
-     * @param delegateVotePower whether to delegate vote power to the dstValidator
-     */
-    function redelegate(
-        address srcValidator,
-        address dstValidator,
-        uint256 shares,
-        bool delegateVotePower
-    )
-    external
-    whenNotPaused
-    notInBlackList
-    validatorExist(srcValidator)
-    validatorExist(dstValidator)
-    enableReceivingFund
-    {
-        if (shares == 0) revert ZeroShares();
-        if (srcValidator == dstValidator) revert SameValidator();
-
-        address delegator = msg.sender;
-        Validator memory srcValInfo = _validators[srcValidator];
-        Validator memory dstValInfo = _validators[dstValidator];
-        if (dstValInfo.jailed && delegator != dstValidator) revert OnlySelfDelegation();
-
-        uint256 metisAmount = IStakeCredit(srcValInfo.creditContract).unbond(delegator, shares);
-        if (metisAmount < minDelegationMETISChange) revert DelegationAmountTooSmall();
-        // check if the srcValidator has enough self delegation
-        if (
-            delegator == srcValidator
-            && IStakeCredit(srcValInfo.creditContract).getPooledMETIS(srcValidator) < minSelfDelegationMETIS
-        ) {
-            revert SelfDelegationNotEnough();
-        }
-
-        uint256 feeCharge = metisAmount * redelegateFeeRate / REDELEGATE_FEE_RATE_BASE;
-        (bool success,) = dstValInfo.creditContract.call{value: feeCharge}("");
-        if (!success) revert TransferFailed();
-
-        metisAmount -= feeCharge;
-        uint256 newShares = IStakeCredit(dstValInfo.creditContract).delegate{value: metisAmount}(delegator);
-        emit Redelegated(srcValidator, dstValidator, delegator, shares, newShares, metisAmount);
-
-        address[] memory stakeCredits = new address[](2);
-        stakeCredits[0] = srcValInfo.creditContract;
-        stakeCredits[1] = dstValInfo.creditContract;
-        IGovToken(GOV_TOKEN_ADDR).syncBatch(stakeCredits, delegator);
-        if (delegateVotePower) {
-            IGovToken(GOV_TOKEN_ADDR).delegateVote(delegator, dstValidator);
-        }
-    }
-
-    /**
      * @dev Claim the undelegated METIS from the pool after unbondPeriod
      * @param operatorAddress the operator address of the validator
      * @param requestNumber the request number of the undelegation. 0 means claim all
@@ -574,27 +444,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     }
 
     /*----------------- system functions -----------------*/
-    /**
-     * @dev This function will be called by consensus engine. So it should never revert.
-     */
-    function distributeReward(
-        address consensusAddress
-    ) external payable onlyValidatorContract {
-        address operatorAddress = consensusToOperator[consensusAddress];
-        Validator memory valInfo = _validators[operatorAddress];
-        if (valInfo.creditContract == address(0) || valInfo.jailed) {
-            (bool success,) = SYSTEM_REWARD_ADDR.call{value: msg.value}("");
-            require(success, "System reward transfer failed");
-            emit RewardDistributeFailed(operatorAddress, "INVALID_VALIDATOR");
-            return;
-        }
-
-        IStakeCredit(valInfo.creditContract).distributeReward{value: msg.value}(valInfo.commission.rate);
-        emit RewardDistributed(operatorAddress, msg.value);
-
-        IGovToken(GOV_TOKEN_ADDR).sync(valInfo.creditContract, operatorAddress);
-    }
-
     /**
      * @dev Downtime slash. Only the `SlashIndicator` contract can call this function.
      */
@@ -683,13 +532,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
             uint256 newUnbondPeriod = value.bytesToUint256(32);
             if (newUnbondPeriod < 3 days || newUnbondPeriod > 30 days) revert InvalidValue(key, value);
             unbondPeriod = newUnbondPeriod;
-        } else if (key.compareStrings("redelegateFeeRate")) {
-            if (value.length != 32) revert InvalidValue(key, value);
-            uint256 newRedelegateFeeRate = value.bytesToUint256(32);
-            if (newRedelegateFeeRate > 100) {
-                revert InvalidValue(key, value);
-            }
-            redelegateFeeRate = newRedelegateFeeRate;
         } else if (key.compareStrings("downtimeSlashAmount")) {
             if (value.length != 32) revert InvalidValue(key, value);
             uint256 newDowntimeSlashAmount = value.bytesToUint256(32);
@@ -724,11 +566,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
             address newStakeHubProtector = value.bytesToAddress(20);
             if (newStakeHubProtector == address(0)) revert InvalidValue(key, value);
             _setProtector(newStakeHubProtector);
-        } else if (key.compareStrings("maxNodeIDs")) {
-            if (value.length != 32) revert InvalidValue(key, value);
-            uint256 newMaxNodeIDs = value.bytesToUint256(32);
-            if (newMaxNodeIDs == 0) revert InvalidValue(key, value);
-            maxNodeIDs = newMaxNodeIDs;
         } else if (key.compareStrings("epochLength")) {
             if (value.length != 32) revert InvalidValue(key, value);
             uint256 newEpochLength = value.bytesToUint256(32);
@@ -852,17 +689,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     /**
      * @param operatorAddress the operator address of the validator
      *
-     * @return the commission of a validator
-     */
-    function getValidatorCommission(
-        address operatorAddress
-    ) external view validatorExist(operatorAddress) returns (Commission memory) {
-        return _validators[operatorAddress].commission;
-    }
-
-    /**
-     * @param operatorAddress the operator address of the validator
-     *
      * @return the updateTime of a validator
      */
     function getValidatorUpdateTime(
@@ -941,119 +767,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     returns (bytes memory)
     {
         return INIT_VALIDATORSET_BYTES;
-    }
-
-    /**
-     * @notice Adds multiple new NodeIDs to the validator's registry.
-     * @param nodeIDs Array of NodeIDs to be added.
-     */
-    function addNodeIDs(
-        bytes32[] calldata nodeIDs
-    ) external whenNotPaused notInBlackList validatorExist(_bep563MsgSender()) {
-        maxNodeIDsInitializer();
-
-        if (nodeIDs.length == 0) {
-            revert InvalidNodeID();
-        }
-
-        address operatorAddress = _bep563MsgSender();
-        bytes32[] storage existingNodeIDs = validatorNodeIDs[operatorAddress];
-        uint256 currentLength = existingNodeIDs.length;
-
-        if (currentLength + nodeIDs.length > maxNodeIDs) {
-            revert ExceedsMaxNodeIDs();
-        }
-
-        // Check for duplicates in new NodeIDs
-        for (uint256 i = 0; i < nodeIDs.length; i++) {
-            if (nodeIDs[i] == bytes32(0)) {
-                revert InvalidNodeID();
-            }
-            for (uint256 j = i + 1; j < nodeIDs.length; j++) {
-                if (nodeIDs[i] == nodeIDs[j]) {
-                    revert DuplicateNodeID();
-                }
-            }
-        }
-
-        // Check for duplicates in existing NodeIDs
-        for (uint256 i = 0; i < nodeIDs.length; i++) {
-            for (uint256 j = 0; j < currentLength; j++) {
-                if (nodeIDs[i] == existingNodeIDs[j]) {
-                    revert DuplicateNodeID();
-                }
-            }
-        }
-
-        // Add new NodeIDs
-        for (uint256 i = 0; i < nodeIDs.length; i++) {
-            existingNodeIDs.push(nodeIDs[i]);
-            emit NodeIDAdded(operatorAddress, nodeIDs[i]);
-        }
-    }
-
-    /**
-     * @notice Removes multiple NodeIDs from the validator's registry.
-     * @param targetNodeIDs Array of NodeIDs to be removed.
-     */
-    function removeNodeIDs(
-        bytes32[] calldata targetNodeIDs
-    ) external whenNotPaused notInBlackList validatorExist(_bep563MsgSender()) {
-        address validator = _bep563MsgSender();
-        bytes32[] storage nodeIDs = validatorNodeIDs[validator];
-        uint256 length = nodeIDs.length;
-
-        // If targetNodeIDs is empty, remove all NodeIDs
-        if (targetNodeIDs.length == 0) {
-            for (uint256 i = 0; i < length; i++) {
-                emit NodeIDRemoved(validator, nodeIDs[i]);
-            }
-            delete validatorNodeIDs[validator];
-            return;
-        }
-
-        // Otherwise, remove specific NodeIDs
-        for (uint256 i = 0; i < targetNodeIDs.length; i++) {
-            bytes32 nodeID = targetNodeIDs[i];
-            for (uint256 j = 0; j < length; j++) {
-                if (nodeIDs[j] == nodeID) {
-                    // Swap and pop
-                    nodeIDs[j] = nodeIDs[length - 1];
-                    nodeIDs.pop();
-                    length--;
-                    emit NodeIDRemoved(validator, nodeID);
-                    break;
-                }
-            }
-        }
-
-        // Clean up storage if no NodeIDs left
-        if (nodeIDs.length == 0) {
-            delete validatorNodeIDs[validator];
-        }
-    }
-
-    /**
-     * @notice Returns all validators with their consensus addresses and registered NodeIDs.
-     * @param validatorsToQuery The operator addresses of the validators.
-     * @return consensusAddresses Array of consensus addresses corresponding to the validators.
-     * @return nodeIDsList Array of NodeIDs for each validator.
-     */
-    function getNodeIDs(
-        address[] calldata validatorsToQuery
-    ) external view returns (address[] memory consensusAddresses, bytes32[][] memory nodeIDsList) {
-        uint256 len = validatorsToQuery.length;
-        consensusAddresses = new address[](len);
-        nodeIDsList = new bytes32[][](len);
-
-        for (uint256 i = 0; i < len; i++) {
-            address operator = validatorsToQuery[i];
-            Validator memory valInfo = _validators[operator];
-            consensusAddresses[i] = valInfo.consensusAddress;
-            nodeIDsList[i] = validatorNodeIDs[operator];
-        }
-
-        return (consensusAddresses, nodeIDsList);
     }
 
     /*----------------- internal functions -----------------*/
@@ -1160,12 +873,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         return _bep410MsgSender();
     }
 
-    function maxNodeIDsInitializer() internal {
-        if (maxNodeIDs == 0) {
-            maxNodeIDs = INIT_MAX_NUMBER_NODE_ID;
-        }
-    }
-
     /**
      * @dev Initialize validators from INIT_VALIDATORSET_BYTES
      * This function is called during contract initialization to set up initial validators
@@ -1192,11 +899,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
                 identity: "",
                 website: "",
                 details: ""
-            });
-            valInfo.commission = Commission({
-                rate: 0,
-                maxRate: 0,
-                maxChangeRate: 0
             });
             valInfo.jailed = false;
             valInfo.jailUntil = 0;
