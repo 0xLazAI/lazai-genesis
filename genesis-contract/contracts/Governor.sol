@@ -63,7 +63,7 @@ contract Governor is
     mapping(address => uint256) public latestProposalIds;
 
     /*----------------- init -----------------*/
-    function initialize() external initializer onlyCoinbase onlyZeroGasPrice {
+    function initialize() external initializer {
         __Governor_init("Governor");
         __GovernorSettings_init(INIT_VOTING_DELAY, INIT_VOTING_PERIOD, INIT_PROPOSAL_THRESHOLD);
         __GovernorCompatibilityBravo_init();
