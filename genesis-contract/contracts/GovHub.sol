@@ -18,7 +18,8 @@ contract GovHub is System {
 
     function updateParam(string calldata key, bytes calldata value, address target) external onlyGovernorTimelock {
         ParamChangePackage memory proposal = ParamChangePackage(key, value, target);
-        notifyUpdates(proposal);
+        uint32 code = notifyUpdates(proposal);
+        require(code == CODE_OK, "GovHub:updateParam failed");
     }
 
     function notifyUpdates(ParamChangePackage memory proposal) internal returns (uint32) {

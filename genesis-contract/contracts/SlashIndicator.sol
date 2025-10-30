@@ -100,9 +100,10 @@ contract SlashIndicator is ISlashIndicator, System, IParamSubscriber {
         }
         indicator.height = block.number;
         if (indicator.count % felonyThreshold == 0) {
+            uint256 felonyCount = indicator.count;
             indicator.count = 0;
             IValidatorSet(VALIDATOR_CONTRACT_ADDR).felony(validator);
-            _downtimeSlash(validator, indicator.count, false);
+            _downtimeSlash(validator, felonyCount, false);
         } else if (indicator.count % misdemeanorThreshold == 0) {
             IValidatorSet(VALIDATOR_CONTRACT_ADDR).misdemeanor(validator);
         }
@@ -345,7 +346,7 @@ contract SlashIndicator is ISlashIndicator, System, IParamSubscriber {
             require(value.length == 32, "length of felonyThreshold mismatch");
             uint256 newFelonyThreshold = BytesToTypes.bytesToUint256(32, value);
             require(
-                newFelonyThreshold <= 1000 && newFelonyThreshold > misdemeanorThreshold,
+                newFelonyThreshold <= 1000 && newFelonyThreshold > misdemeanorThreshold && newFelonyThreshold >= DECREASE_RATE,
                 "the felonyThreshold out of range"
             );
             felonyThreshold = newFelonyThreshold;

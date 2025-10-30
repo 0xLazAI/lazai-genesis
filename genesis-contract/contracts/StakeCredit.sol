@@ -166,6 +166,7 @@ contract StakeCredit is SystemV2, Initializable, ReentrancyGuardUpgradeable, ERC
 
             // remove from the queue
             _unbondRequestsQueue[delegator].popFront();
+            delete _unbondRequests[hash];
 
             _totalMetisAmount += request.metisAmount;
             --number;

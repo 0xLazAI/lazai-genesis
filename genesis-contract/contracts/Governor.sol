@@ -314,6 +314,7 @@ contract Governor is
         notInBlackList
         returns (uint256)
     {
+        if (blackList[account]) revert InBlackList();
         return GovernorPreventLateQuorumUpgradeable._castVote(proposalId, account, support, reason, params);
     }
 
