@@ -166,6 +166,7 @@ contract StakeCredit is SystemV2, Initializable, ReentrancyGuardUpgradeable, ERC
 
             // remove from the queue
             _unbondRequestsQueue[delegator].popFront();
+            delete _unbondRequests[hash];
 
             _totalMetisAmount += request.metisAmount;
             --number;
@@ -177,28 +178,6 @@ contract StakeCredit is SystemV2, Initializable, ReentrancyGuardUpgradeable, ERC
         if (!success) revert TransferFailed();
 
         return _totalMetisAmount;
-    }
-
-    /**
-     * @dev Distribute the reward to the validator and all delegators. Only the `StakeHub` contract can call this function.
-     * @param commissionRate the commission rate of the validator
-     */
-    function distributeReward(
-        uint64 commissionRate
-    ) external payable onlyStakeHub {
-        uint256 metisAmount = msg.value;
-        uint256 _commission = (metisAmount * uint256(commissionRate)) / COMMISSION_RATE_BASE;
-        uint256 _reward = metisAmount - _commission;
-
-        uint256 index = block.timestamp / IStakeHub(STAKE_HUB_ADDR).BREATHE_BLOCK_INTERVAL();
-        totalPooledMETISRecord[index] = totalPooledMETIS;
-        rewardRecord[index] += _reward;
-        totalPooledMETIS += _reward;
-
-        // mint commission to the validator
-        _mintAndSync(validator, _commission);
-
-        emit RewardReceived(_reward, _commission);
     }
 
     /**
@@ -324,14 +303,11 @@ contract StakeCredit is SystemV2, Initializable, ReentrancyGuardUpgradeable, ERC
         uint256 initAmount
     ) internal onlyInitializing {
         // check before mint
-        uint256 toLock = IStakeHub(STAKE_HUB_ADDR).LOCK_AMOUNT();
-        if (initAmount <= toLock || validator == address(0) || totalSupply() != 0) revert WrongInitContext();
+        if (initAmount == 0 || validator == address(0) || totalSupply() != 0) revert WrongInitContext();
 
-        // mint initial tokens to the validator and lock some of them
+        // mint all initial tokens to the validator (no locking)
         // shares is equal to the amount of METIS staked
-        address deadAddress = IStakeHub(STAKE_HUB_ADDR).DEAD_ADDRESS();
-        _mint(deadAddress, toLock);
-        uint256 initShares = initAmount - toLock;
+        uint256 initShares = initAmount;
         _mint(validator, initShares);
 
         totalPooledMETIS = initAmount;
