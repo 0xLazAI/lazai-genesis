@@ -3,7 +3,7 @@ const nunjucks = require('nunjucks');
 const fs = require('fs');
 const web3 = require('web3');
 
-const validators = require('./validators_abi');
+const validators = require('./validators');
 const init_holders = require('./init_holders');
 
 program.version('0.0.1');
