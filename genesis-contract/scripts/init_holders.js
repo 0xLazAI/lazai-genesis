@@ -9,7 +9,7 @@ const init_holders = [
         balance: BigInt('10000000000000000000000000').toString(16), // 10000000 metis
     },
     {
-        address: '', // mainnet
+        address: '0x6e7F4E67048c40F48aD097dc850E6BeA19F3F351', // mainnet
         balance: BigInt('40000000000000000000000').toString(16), // 40000 metis
     },
 ];

@@ -76,7 +76,7 @@ contract Governor is
         whitelistTargets[GOV_HUB_ADDR] = true;
 
         // Different address will be set depending on the environment
-        __Protectable_init_unchained(0xA08BC19924B51B0BDAA8C5938DE31EDED75701F2);
+        __Protectable_init_unchained(0xa08bC19924B51B0BdAA8c5938dE31EDeD75701f2);
     }
 
     /*----------------- external functions -----------------*/
@@ -314,7 +314,6 @@ contract Governor is
         notInBlackList
         returns (uint256)
     {
-        if (blackList[account]) revert InBlackList();
         return GovernorPreventLateQuorumUpgradeable._castVote(proposalId, account, support, reason, params);
     }
 

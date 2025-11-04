@@ -16,3 +16,4 @@ lib/forge-std/
 **/.bak
 .DS_Store
 *.pyc
+/genesis-contract/lib/

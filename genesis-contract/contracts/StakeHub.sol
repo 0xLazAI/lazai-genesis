@@ -223,7 +223,7 @@ contract StakeHub is SystemV2, Initializable, Protectable {
         felonyJailTime = 30 days;
         maxFelonyBetweenBreatheBlock = 2;
         // Different address will be set depending on the environment
-        __Protectable_init_unchained(0xA08BC19924B51B0BDAA8C5938DE31EDED75701F2);
+        __Protectable_init_unchained(0xa08bC19924B51B0BdAA8c5938dE31EDeD75701f2);
 
         // Initialize validators from INIT_VALIDATORSET_BYTES
         _initializeValidatorsFromBytes();

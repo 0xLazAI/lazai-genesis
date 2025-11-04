@@ -24,6 +24,7 @@ contract SlashIndicator is ISlashIndicator, System, IParamSubscriber {
     address[] public validators;
     mapping(address => Indicator) public indicators;
     uint256 public previousHeight;
+    mapping(bytes32 => bool) public usedEvidences;
 
     // The validators assign proper values for `misdemeanorThreshold` and `felonyThreshold` through governance.
     // The proper values depends on network's tolerance for continuous missing blocks.
@@ -38,7 +39,7 @@ contract SlashIndicator is ISlashIndicator, System, IParamSubscriber {
     uint256 public felonySlashRewardRatio;
     bool public enableMaliciousVoteSlash;
 
-    uint256 public constant INIT_FELONY_SLASH_SCOPE = 28800; // 1 days(block number)
+    uint256 public constant INIT_FELONY_SLASH_SCOPE = 86400; // 1 days(block number)
 
     uint256 public felonySlashScope;
 
@@ -188,6 +189,8 @@ contract SlashIndicator is ISlashIndicator, System, IParamSubscriber {
 
     function submitFinalityViolationEvidence(FinalityEvidence memory _evidence) public onlyInit {
         require(enableMaliciousVoteSlash, "malicious vote slash not enabled");
+        bytes32 evidenceHash = keccak256(abi.encode(_evidence));
+        require(!usedEvidences[evidenceHash], "evidencealready submitted");
         if (felonySlashRewardRatio == 0) {
             felonySlashRewardRatio = INIT_FELONY_SLASH_REWARD_RATIO;
         }
@@ -231,6 +234,7 @@ contract SlashIndicator is ISlashIndicator, System, IParamSubscriber {
             "verify signature failed"
         );
 
+        usedEvidences[evidenceHash] = true;
         // reward sender and felony validator if validator found
         (address[] memory vals, bytes[] memory voteAddrs) =
                                 IValidatorSet(VALIDATOR_CONTRACT_ADDR).getLivingValidators();
