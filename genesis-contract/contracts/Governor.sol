@@ -34,14 +34,14 @@ contract Governor is
      * @dev caution:
      * INIT_VOTING_DELAY, INIT_VOTING_PERIOD and INIT_MIN_PERIOD_AFTER_QUORUM are default in number of blocks, not seconds
      */
-    uint256 private constant BLOCK_INTERVAL = 3 seconds; // TODO(Nathan): Only can be used to do initialize!
+    uint256 private constant BLOCK_INTERVAL = 1 seconds;
     uint256 private constant INIT_VOTING_DELAY = 0 hours / BLOCK_INTERVAL;
     uint256 private constant INIT_VOTING_PERIOD = 7 days / BLOCK_INTERVAL;
-    uint256 private constant INIT_PROPOSAL_THRESHOLD = 200 ether; //  = 200 METIS
+    uint256 private constant INIT_PROPOSAL_THRESHOLD = 20_000 ether; //  = 20000 METIS
     uint256 private constant INIT_QUORUM_NUMERATOR = 10; // for >= 10%
 
     // starting propose requires totalSupply of GovMETIS >= 10000000 * 1e18
-    uint256 private constant PROPOSE_START_GOVMETIS_SUPPLY_THRESHOLD = 10_000_000 ether;
+    uint256 private constant PROPOSE_START_GOVMETIS_SUPPLY_THRESHOLD = 20_000 ether;
     // ensures there is a minimum voting period (1 days) after quorum is reached
     uint64 private constant INIT_MIN_PERIOD_AFTER_QUORUM = uint64(1 days / BLOCK_INTERVAL);
 
@@ -76,7 +76,7 @@ contract Governor is
         whitelistTargets[GOV_HUB_ADDR] = true;
 
         // Different address will be set depending on the environment
-        __Protectable_init_unchained(0x08E68Ec70FA3b629784fDB28887e206ce8561E08);
+        __Protectable_init_unchained(0xA08BC19924B51B0BDAA8C5938DE31EDED75701F2);
     }
 
     /*----------------- external functions -----------------*/
