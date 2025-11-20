@@ -265,19 +265,6 @@
   },
   {
     "type": "function",
-    "name": "editConsensusAddress",
-    "inputs": [
-      {
-        "name": "newConsensusAddress",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "editDescription",
     "inputs": [
       {
