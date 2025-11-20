@@ -6,11 +6,15 @@ const init_holders = [
     // },
     {
         address: '0xddd8e974a417823966774e502235f8a936837803', // mainnet
-        balance: BigInt('10000000000000000000000000').toString(16), // 10000000 metis
+        balance: BigInt('9999993000000000000000000').toString(16), // 9,999,993 metis
+    },
+    {
+        address: '0xa7ECcdb9Be08178f896c26b7BbD8C3D4E844d9Ba', // mainnet
+        balance: BigInt('5000000000000000000').toString(16), // hyperlane 5 metis
     },
     {
         address: '0x6e7F4E67048c40F48aD097dc850E6BeA19F3F351', // mainnet
-        balance: BigInt('40000000000000000000000').toString(16), // 40000 metis
+        balance: BigInt('2000000000000000000').toString(16), // 2 metis
     },
 ];
 

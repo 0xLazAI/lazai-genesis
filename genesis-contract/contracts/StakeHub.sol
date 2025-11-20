@@ -282,29 +282,6 @@ contract StakeHub is SystemV2, Initializable, Protectable {
     }
 
     /**
-     * @param newConsensusAddress the new consensus address of the validator
-     */
-    function editConsensusAddress(
-        address newConsensusAddress
-    ) external whenNotPaused notInBlackList validatorExist(_bep410MsgSender()) {
-        if (newConsensusAddress == address(0)) revert InvalidConsensusAddress();
-        if (consensusToOperator[newConsensusAddress] != address(0)) {
-            revert DuplicateConsensusAddress();
-        }
-
-        address operatorAddress = _bep410MsgSender();
-        Validator storage valInfo = _validators[operatorAddress];
-        if (valInfo.updateTime + BREATHE_BLOCK_INTERVAL > block.timestamp) revert UpdateTooFrequently();
-
-        consensusExpiration[valInfo.consensusAddress] = block.timestamp;
-        valInfo.consensusAddress = newConsensusAddress;
-        valInfo.updateTime = block.timestamp;
-        consensusToOperator[newConsensusAddress] = operatorAddress;
-
-        emit ConsensusAddressEdited(operatorAddress, newConsensusAddress);
-    }
-
-    /**
      * @notice the moniker of the validator will be ignored as it is not editable
      * @param description the new description of the validator
      */
